@@ -1,0 +1,8 @@
+input/
+frames/
+sparse/
+dense/
+database.db
+*.log
+__pycache__/
+.venv/
