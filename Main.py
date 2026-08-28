@@ -17,10 +17,12 @@ Sparse_DIR= BASE_DIR / "sparse"
 LOG_FILE_FrameExtraction = BASE_DIR / "run_frame_extraction.log"
 LOG_FILE_SparseReconstruction=BASE_DIR / "run_sparse_reconstruct.log"
 DATABASE_PATH = BASE_DIR / "database.db"
-
+Dense_DIR= BASE_DIR / "Phase_3"
+LOG_FILE_DenseR=BASE_DIR / "Dense_Reconstruction.log"
 INPUT_DIR.mkdir(exist_ok=True)
 FRAMES_DIR.mkdir(exist_ok=True)
 Sparse_DIR.mkdir(exist_ok=True)
+Dense_DIR.mkdir(exist_ok=True)
 
 def resize_for_analysis(frame, width=640):
 
@@ -174,11 +176,17 @@ if "extraction_done" not in st.session_state:
 if "sparse_reconstruct" not in st.session_state:
     st.session_state.sparse_reconstruct=False
 
+if "dense_reconstruction" not in st.session_state:
+    st.session_state.dense_reconstruction=False
+
 if "logs" not in st.session_state:
     st.session_state.logs = ""
 
 if "logs_reconstruct" not in st.session_state:
     st.session_state.logs_reconstruct=""
+
+if "logs_DenseR" not in st.session_state:
+    st.session_state.logs_DenseR=""
 
 if "frame_count" not in st.session_state:
     st.session_state.frame_count = 0
@@ -743,7 +751,108 @@ elif st.session_state.step == 2:
         st.rerun()
 
 elif st.session_state.step==3:
-        st.write("COLMAP Phase 3")
-        if st.button("← Back to 1"):
-            st.session_state.step = 1
+    st.write("COLMAP Image Undistorter, patch match stereo, stereo fusion: ")
+    if st.button("Launch"):
+        for item in Dense_DIR.iterdir():
+            if item.is_file() or item.is_symlink():
+                item.unlink()
+            elif item.is_dir():
+                shutil.rmtree(item)
+
+        st.session_state.logs_DenseR = ""
+        st.session_state.dense_reconstruction = False
+
+
+        Dense_Cmd = f"""
+                colmap image_undistorter \
+                --image_path "{FRAMES_DIR}" \
+                --input_path "{Sparse_DIR / '0'}" \
+                --output_path "{Dense_DIR}" \
+                --output_type COLMAP \
+                --max_image_size 2000 && \
+                colmap patch_match_stereo \
+                --workspace_path "{Dense_DIR}" \
+                --workspace_format COLMAP \
+                --PatchMatchStereo.geom_consistency true && \
+                colmap stereo_fusion \
+                --workspace_path "{Dense_DIR}" \
+                --workspace_format COLMAP \
+                --input_type geometric \
+                --output_path "{Dense_DIR / 'fused.ply'}"
+            """
+
+        with open(LOG_FILE_DenseR,"a") as log_file:
+                log_file.write(
+                    f"\n\n{'=' * 50}\n"
+                    f"NEW RUN: {datetime.now()}\n"
+                    f"{'=' * 50}\n"
+                )
+
+        colmap_env = os.environ.copy()
+        colmap_env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+        colmap_env.pop("QT_QPA_FONTDIR", None)
+        colmap_env.pop("QT_PLUGIN_PATH", None)
+
+        process=subprocess.Popen(
+            ["bash", "-c", Dense_Cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=colmap_env
+
+        )
+
+        for line in process.stdout:
+
+            st.session_state.logs_DenseR += line ########
+
+            with open(
+                LOG_FILE_DenseR,
+                "a"
+            ) as log_file:
+
+                log_file.write(line)
+        return_code=process.wait()
+        if return_code==0:
+            st.session_state.dense_reconstruction=True
+        else:
+            st.session_state.dense_reconstruction=False
+#CpC2 Code :
+    if st.session_state.dense_reconstruction:
+
+        st.success(
+            "✓ Dense Reconstruction completed"
+        )
+
+        st.caption(
+            f"Saved to: {Dense_DIR}"
+        )
+
+
+        with st.expander("Show processing log"):
+
+            st.code(
+                st.session_state.logs_DenseR,
+                language="text"
+            )
+
+            st.caption(
+                f"Full log saved at: "
+                f"{LOG_FILE_DenseR}"
+            )
+    else:
+        st.write("Error Dense Reconstruction fail :(")
+
+    if st.button("Back"):
+
+            st.session_state.step = 2
+
             st.rerun()
+
+
+    if st.button("← Back to 1"):
+
+        st.session_state.step = 1
+
+        st.rerun()
